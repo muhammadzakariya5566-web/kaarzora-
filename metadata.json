@@ -1,0 +1,6 @@
+{
+  "name": "KaamLab Business Services",
+  "description": "Digital services agency platform for Pakistani small businesses offering Social Media Management, Video Editing, Logo and Branding, and Business Website Development.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

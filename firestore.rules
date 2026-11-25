@@ -1,0 +1,553 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Health connection check
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // --- Helper Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isVerifiedUser() && request.auth.uid == uid;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'muhammadzakariya5566@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUser(data, uid) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'preferredLang', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'businessName', 'phone', 'city', 'preferredLang', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid == uid && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.role in ['customer', 'freelancer', 'admin']
+        && (!('businessName' in data) || (data.businessName is string && data.businessName.size() <= 160))
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 40))
+        && (!('city' in data) || (data.city is string && data.city.size() <= 80))
+        && data.preferredLang in ['en', 'ur']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidService(data, serviceId) {
+      return data.keys().hasAll(['id', 'category', 'title', 'titleUr', 'description', 'descriptionUr', 'pricePkr', 'turnaroundDays', 'commissionRate', 'deliverables', 'active', 'imagePath', 'sortOrder', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'category', 'title', 'titleUr', 'description', 'descriptionUr', 'pricePkr', 'turnaroundDays', 'commissionRate', 'deliverables', 'active', 'imagePath', 'sortOrder', 'updatedAt'])
+        && data.id is string && data.id == serviceId && isValidId(data.id)
+        && data.category in ['social_media', 'video_editing', 'logo_branding', 'web_dev']
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 120
+        && data.titleUr is string && data.titleUr.size() >= 2 && data.titleUr.size() <= 140
+        && data.description is string && data.description.size() >= 10 && data.description.size() <= 1200
+        && data.descriptionUr is string && data.descriptionUr.size() >= 2 && data.descriptionUr.size() <= 1200
+        && data.pricePkr is number && data.pricePkr >= 500 && data.pricePkr <= 10000000
+        && data.turnaroundDays is number && data.turnaroundDays >= 1 && data.turnaroundDays <= 365
+        && data.commissionRate is number && data.commissionRate >= 0 && data.commissionRate <= 80
+        && data.deliverables is list && data.deliverables.size() >= 1 && data.deliverables.size() <= 12 && data.deliverables[0] is string
+        && data.active is bool
+        && data.imagePath is string && data.imagePath.size() <= 300
+        && data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 100
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFreelancerProfile(data, uid) {
+      return data.keys().hasAll(['uid', 'displayName', 'city', 'specialty', 'skills', 'bio', 'portfolioLinks', 'experienceYears', 'availability', 'status', 'completedOrders', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'city', 'specialty', 'skills', 'bio', 'portfolioLinks', 'experienceYears', 'availability', 'status', 'completedOrders', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid == uid && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.city is string && data.city.size() >= 1 && data.city.size() <= 80
+        && data.specialty in ['social_media', 'video_editing', 'logo_branding', 'web_dev']
+        && data.skills is list && data.skills.size() >= 1 && data.skills.size() <= 15 && data.skills[0] is string
+        && data.bio is string && data.bio.size() >= 10 && data.bio.size() <= 1200
+        && data.portfolioLinks is list && data.portfolioLinks.size() <= 6 && (data.portfolioLinks.size() == 0 || data.portfolioLinks[0] is string)
+        && data.experienceYears is number && data.experienceYears >= 0 && data.experienceYears <= 60
+        && data.availability in ['available', 'busy']
+        && data.status in ['active', 'suspended']
+        && data.completedOrders is number && data.completedOrders >= 0 && data.completedOrders <= 100000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFreelancerPayout(data, uid) {
+      return data.keys().hasAll(['uid', 'bankName', 'accountTitle', 'ibanOrAccount', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'bankName', 'accountTitle', 'ibanOrAccount', 'updatedAt'])
+        && data.uid is string && data.uid == uid && isValidId(data.uid)
+        && data.bankName is string && data.bankName.size() >= 2 && data.bankName.size() <= 120
+        && data.accountTitle is string && data.accountTitle.size() >= 2 && data.accountTitle.size() <= 120
+        && data.ibanOrAccount is string && data.ibanOrAccount.size() >= 4 && data.ibanOrAccount.size() <= 64
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFreelancerApplication(data, uid) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'phone', 'city', 'specialty', 'skills', 'bio', 'portfolioLinks', 'experienceYears', 'bankName', 'accountTitle', 'ibanOrAccount', 'status', 'adminNote', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'phone', 'city', 'specialty', 'skills', 'bio', 'portfolioLinks', 'experienceYears', 'bankName', 'accountTitle', 'ibanOrAccount', 'status', 'adminNote', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid == uid && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 120
+        && data.phone is string && data.phone.size() >= 7 && data.phone.size() <= 40
+        && data.city is string && data.city.size() >= 2 && data.city.size() <= 80
+        && data.specialty in ['social_media', 'video_editing', 'logo_branding', 'web_dev']
+        && data.skills is list && data.skills.size() >= 1 && data.skills.size() <= 15 && data.skills[0] is string
+        && data.bio is string && data.bio.size() >= 10 && data.bio.size() <= 1200
+        && data.portfolioLinks is list && data.portfolioLinks.size() <= 6 && (data.portfolioLinks.size() == 0 || data.portfolioLinks[0] is string)
+        && data.experienceYears is number && data.experienceYears >= 0 && data.experienceYears <= 60
+        && data.bankName is string && data.bankName.size() >= 2 && data.bankName.size() <= 120
+        && data.accountTitle is string && data.accountTitle.size() >= 2 && data.accountTitle.size() <= 120
+        && data.ibanOrAccount is string && data.ibanOrAccount.size() >= 4 && data.ibanOrAccount.size() <= 64
+        && data.status in ['pending', 'approved', 'rejected']
+        && data.adminNote is string && data.adminNote.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+        'orderCode', 'customerUid', 'customerName', 'businessName', 'serviceId', 'serviceTitle', 'serviceCategory',
+        'title', 'description', 'deadline', 'pricePkr', 'commissionPercent', 'freelancerEarningPkr', 'agencyProfitPkr',
+        'status', 'paymentStatus', 'paymentBank', 'paymentReference', 'paymentAmountPkr', 'paymentReceiptFileId',
+        'paymentReceiptName', 'paymentNotes', 'paymentVerifiedBy', 'paymentRejectionReason',
+        'assignedFreelancerUid', 'assignedFreelancerName', 'reviewRating', 'reviewComment', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'orderCode', 'customerUid', 'customerName', 'businessName', 'serviceId', 'serviceTitle', 'serviceCategory',
+        'title', 'description', 'deadline', 'pricePkr', 'commissionPercent', 'freelancerEarningPkr', 'agencyProfitPkr',
+        'status', 'paymentStatus', 'paymentBank', 'paymentReference', 'paymentAmountPkr', 'paymentReceiptFileId',
+        'paymentReceiptName', 'paymentNotes', 'paymentVerifiedBy', 'paymentRejectionReason',
+        'assignedFreelancerUid', 'assignedFreelancerName', 'reviewRating', 'reviewComment', 'createdAt', 'updatedAt'
+      ])
+        && data.orderCode is string && data.orderCode.size() >= 4 && data.orderCode.size() <= 32
+        && data.customerUid is string && isValidId(data.customerUid)
+        && data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120
+        && data.businessName is string && data.businessName.size() >= 1 && data.businessName.size() <= 160
+        && data.serviceId is string && isValidId(data.serviceId)
+        && data.serviceTitle is string && data.serviceTitle.size() >= 2 && data.serviceTitle.size() <= 120
+        && data.serviceCategory in ['social_media', 'video_editing', 'logo_branding', 'web_dev']
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 160
+        && data.description is string && data.description.size() >= 10 && data.description.size() <= 4000
+        && data.deadline is string && data.deadline.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.pricePkr is number && data.pricePkr >= 500 && data.pricePkr <= 10000000
+        && data.commissionPercent is number && data.commissionPercent >= 0 && data.commissionPercent <= 80
+        && data.freelancerEarningPkr is number && data.freelancerEarningPkr >= 0
+        && data.agencyProfitPkr is number && data.agencyProfitPkr >= 0
+        && data.status in ['awaiting_payment', 'payment_submitted', 'payment_verified', 'in_progress', 'submitted_for_review', 'revision_requested', 'completed', 'cancelled']
+        && data.paymentStatus in ['unpaid', 'submitted', 'verified', 'rejected']
+        && data.paymentBank is string && data.paymentBank.size() <= 120
+        && data.paymentReference is string && data.paymentReference.size() <= 120
+        && data.paymentAmountPkr is number && data.paymentAmountPkr >= 0
+        && data.paymentReceiptFileId is string && data.paymentReceiptFileId.size() <= 128
+        && data.paymentReceiptName is string && data.paymentReceiptName.size() <= 200
+        && data.paymentNotes is string && data.paymentNotes.size() <= 500
+        && data.paymentVerifiedBy is string && data.paymentVerifiedBy.size() <= 128
+        && data.paymentRejectionReason is string && data.paymentRejectionReason.size() <= 500
+        && data.assignedFreelancerUid is string && data.assignedFreelancerUid.size() <= 128
+        && data.assignedFreelancerName is string && data.assignedFreelancerName.size() <= 120
+        && data.reviewRating is number && data.reviewRating >= 0 && data.reviewRating <= 5
+        && data.reviewComment is string && data.reviewComment.size() <= 1000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidOrderFile(data) {
+      return data.keys().hasAll(['ownerUid', 'ownerName', 'ownerRole', 'kind', 'fileId', 'fileName', 'mimeType', 'sizeBytes', 'note', 'createdAt'])
+        && data.keys().hasOnly(['ownerUid', 'ownerName', 'ownerRole', 'kind', 'fileId', 'fileName', 'mimeType', 'sizeBytes', 'note', 'createdAt'])
+        && data.ownerUid is string && isValidId(data.ownerUid)
+        && data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 120
+        && data.ownerRole in ['customer', 'freelancer', 'admin']
+        && data.kind in ['brief', 'deliverable']
+        && data.fileId is string && isValidId(data.fileId)
+        && data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 240
+        && data.mimeType is string && data.mimeType.size() >= 1 && data.mimeType.size() <= 120
+        && data.sizeBytes is number && data.sizeBytes >= 1 && data.sizeBytes <= 52428800
+        && data.note is string && data.note.size() <= 400
+        && data.createdAt is timestamp;
+    }
+
+    function isValidOrderTask(data) {
+      return data.keys().hasAll(['title', 'status', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'status', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 200
+        && data.status in ['todo', 'in_progress', 'done']
+        && data.createdByUid is string && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidOrderMessage(data) {
+      return data.keys().hasAll(['senderUid', 'senderName', 'senderRole', 'body', 'createdAt'])
+        && data.keys().hasOnly(['senderUid', 'senderName', 'senderRole', 'body', 'createdAt'])
+        && data.senderUid is string && isValidId(data.senderUid)
+        && data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 120
+        && data.senderRole in ['customer', 'freelancer', 'admin']
+        && data.body is string && data.body.size() >= 1 && data.body.size() <= 2000
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAssignment(data) {
+      return data.keys().hasAll(['orderId', 'orderCode', 'orderTitle', 'serviceCategory', 'freelancerUid', 'freelancerName', 'customerName', 'grossPkr', 'commissionPercent', 'commissionPkr', 'netPayoutPkr', 'status', 'payoutReference', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['orderId', 'orderCode', 'orderTitle', 'serviceCategory', 'freelancerUid', 'freelancerName', 'customerName', 'grossPkr', 'commissionPercent', 'commissionPkr', 'netPayoutPkr', 'status', 'payoutReference', 'createdAt', 'updatedAt'])
+        && data.orderId is string && isValidId(data.orderId)
+        && data.orderCode is string && data.orderCode.size() >= 4 && data.orderCode.size() <= 32
+        && data.orderTitle is string && data.orderTitle.size() >= 2 && data.orderTitle.size() <= 160
+        && data.serviceCategory in ['social_media', 'video_editing', 'logo_branding', 'web_dev']
+        && data.freelancerUid is string && isValidId(data.freelancerUid)
+        && data.freelancerName is string && data.freelancerName.size() >= 1 && data.freelancerName.size() <= 120
+        && data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120
+        && data.grossPkr is number && data.grossPkr >= 0
+        && data.commissionPercent is number && data.commissionPercent >= 0 && data.commissionPercent <= 80
+        && data.commissionPkr is number && data.commissionPkr >= 0
+        && data.netPayoutPkr is number && data.netPayoutPkr >= 0
+        && data.status in ['active', 'submitted', 'completed', 'paid_out']
+        && data.payoutReference is string && data.payoutReference.size() <= 120
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasAll(['orderId', 'customerUid', 'customerName', 'businessName', 'serviceCategory', 'serviceTitle', 'rating', 'comment', 'createdAt'])
+        && data.keys().hasOnly(['orderId', 'customerUid', 'customerName', 'businessName', 'serviceCategory', 'serviceTitle', 'rating', 'comment', 'createdAt'])
+        && data.orderId is string && isValidId(data.orderId)
+        && data.customerUid is string && isValidId(data.customerUid)
+        && data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120
+        && data.businessName is string && data.businessName.size() >= 1 && data.businessName.size() <= 160
+        && data.serviceCategory in ['social_media', 'video_editing', 'logo_branding', 'web_dev']
+        && data.serviceTitle is string && data.serviceTitle.size() >= 2 && data.serviceTitle.size() <= 120
+        && data.rating is number && data.rating >= 1 && data.rating <= 5
+        && data.comment is string && data.comment.size() >= 5 && data.comment.size() <= 1000
+        && data.createdAt is timestamp;
+    }
+
+    function isValidPaymentSettings(data) {
+      return data.keys().hasAll(['bankName', 'accountTitle', 'accountNumber', 'iban', 'jazzcashNumber', 'instructions', 'instructionsUr', 'updatedAt'])
+        && data.keys().hasOnly(['bankName', 'accountTitle', 'accountNumber', 'iban', 'jazzcashNumber', 'instructions', 'instructionsUr', 'updatedAt'])
+        && data.bankName is string && data.bankName.size() >= 2 && data.bankName.size() <= 120
+        && data.accountTitle is string && data.accountTitle.size() >= 2 && data.accountTitle.size() <= 120
+        && data.accountNumber is string && data.accountNumber.size() >= 4 && data.accountNumber.size() <= 64
+        && data.iban is string && data.iban.size() >= 8 && data.iban.size() <= 64
+        && data.jazzcashNumber is string && data.jazzcashNumber.size() <= 40
+        && data.instructions is string && data.instructions.size() >= 5 && data.instructions.size() <= 1000
+        && data.instructionsUr is string && data.instructionsUr.size() >= 2 && data.instructionsUr.size() <= 1000
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCommissionSettings(data) {
+      return data.keys().hasAll(['defaultCommissionPercent', 'socialMediaPercent', 'videoEditingPercent', 'logoBrandingPercent', 'webDevPercent', 'updatedAt'])
+        && data.keys().hasOnly(['defaultCommissionPercent', 'socialMediaPercent', 'videoEditingPercent', 'logoBrandingPercent', 'webDevPercent', 'updatedAt'])
+        && data.defaultCommissionPercent is number && data.defaultCommissionPercent >= 0 && data.defaultCommissionPercent <= 80
+        && data.socialMediaPercent is number && data.socialMediaPercent >= 0 && data.socialMediaPercent <= 80
+        && data.videoEditingPercent is number && data.videoEditingPercent >= 0 && data.videoEditingPercent <= 80
+        && data.logoBrandingPercent is number && data.logoBrandingPercent >= 0 && data.logoBrandingPercent <= 80
+        && data.webDevPercent is number && data.webDevPercent >= 0 && data.webDevPercent <= 80
+        && data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // Admins registry
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create, update, delete: if isValidId(uid) && isBootstrappedAdmin();
+    }
+
+    // Users (PII isolated to owner or admin)
+    match /users/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isAdmin());
+      allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.uid == request.auth.uid);
+      allow create: if isValidId(uid) && isValidUser(incoming(), uid)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          (isOwner(uid) && (incoming().role == 'customer' || (isBootstrappedAdmin() && incoming().role == 'admin')))
+          || isAdmin()
+        );
+      allow update: if isValidId(uid) && isValidUser(incoming(), uid)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (isOwner(uid) && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'businessName', 'phone', 'city', 'preferredLang', 'updatedAt']))
+        );
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    // Services catalogue (public read, admin write)
+    match /services/{serviceId} {
+      allow get: if isValidId(serviceId);
+      allow list: if true;
+      allow create: if isValidId(serviceId) && isAdmin() && isValidService(incoming(), serviceId) && incoming().updatedAt == request.time;
+      allow update: if isValidId(serviceId) && isAdmin() && isValidService(incoming(), serviceId) && incoming().id == existing().id && incoming().updatedAt == request.time;
+      allow delete: if isValidId(serviceId) && isAdmin();
+    }
+
+    // Freelancers public portfolio (no PII)
+    match /freelancers/{uid} {
+      allow get: if isValidId(uid) && isVerifiedUser();
+      allow list: if isVerifiedUser();
+      allow create: if isValidId(uid) && isAdmin() && isValidFreelancerProfile(incoming(), uid)
+        && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(uid) && isValidFreelancerProfile(incoming(), uid)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (isOwner(uid) && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'city', 'skills', 'bio', 'portfolioLinks', 'experienceYears', 'availability', 'updatedAt']))
+        );
+      allow delete: if isValidId(uid) && isAdmin();
+
+      // Isolated payout PII subcollection
+      match /private/payout {
+        allow get: if isValidId(uid) && (isOwner(uid) || isAdmin());
+        allow create, update: if isValidId(uid) && (isOwner(uid) || isAdmin())
+          && isValidFreelancerPayout(incoming(), uid) && incoming().updatedAt == request.time;
+        allow delete: if isValidId(uid) && isAdmin();
+      }
+    }
+
+    // Freelancer applications (PII isolated to owner or admin)
+    match /freelancerApplications/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isAdmin());
+      allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.uid == request.auth.uid);
+      allow create: if isValidId(uid) && isOwner(uid) && isValidFreelancerApplication(incoming(), uid)
+        && incoming().status == 'pending'
+        && incoming().adminNote == ''
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(uid) && isValidFreelancerApplication(incoming(), uid)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (isOwner(uid) && existing().status == 'rejected' && incoming().status == 'pending' && incoming().adminNote == existing().adminNote
+              && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phone', 'city', 'specialty', 'skills', 'bio', 'portfolioLinks', 'experienceYears', 'bankName', 'accountTitle', 'ibanOrAccount', 'status', 'updatedAt']))
+        );
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    // Orders (Customer, Assigned Freelancer, Admin)
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && (
+        isAdmin() || (isVerifiedUser() && (existing().customerUid == request.auth.uid || existing().assignedFreelancerUid == request.auth.uid))
+      );
+      allow list: if isBootstrappedAdmin() || (
+        isVerifiedUser() && (resource.data.customerUid == request.auth.uid || resource.data.assignedFreelancerUid == request.auth.uid)
+      );
+      allow create: if isValidId(orderId) && isVerifiedUser() && isValidOrder(incoming())
+        && incoming().customerUid == request.auth.uid
+        && incoming().status == 'awaiting_payment'
+        && incoming().paymentStatus == 'unpaid'
+        && incoming().assignedFreelancerUid == ''
+        && incoming().assignedFreelancerName == ''
+        && incoming().paymentVerifiedBy == ''
+        && incoming().reviewRating == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/services/$(incoming().serviceId))
+        && incoming().pricePkr == get(/databases/$(database)/documents/services/$(incoming().serviceId)).data.pricePkr;
+
+      allow update: if isValidId(orderId) && isVerifiedUser() && isValidOrder(incoming())
+        && incoming().customerUid == existing().customerUid
+        && incoming().serviceId == existing().serviceId
+        && incoming().orderCode == existing().orderCode
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            !(existing().status in ['completed', 'cancelled']) && (
+              // Customer action: submit manual payment receipt
+              (
+                existing().customerUid == request.auth.uid
+                && existing().status in ['awaiting_payment', 'payment_submitted']
+                && existing().paymentStatus in ['unpaid', 'rejected']
+                && incoming().status == 'payment_submitted'
+                && incoming().paymentStatus == 'submitted'
+                && incoming().diff(existing()).affectedKeys().hasOnly([
+                  'status', 'paymentStatus', 'paymentBank', 'paymentReference',
+                  'paymentAmountPkr', 'paymentReceiptFileId', 'paymentReceiptName',
+                  'paymentNotes', 'paymentRejectionReason', 'updatedAt'
+                ])
+              )
+              ||
+              // Customer action: approve submitted work or request revision
+              (
+                existing().customerUid == request.auth.uid
+                && existing().status == 'submitted_for_review'
+                && incoming().status in ['completed', 'revision_requested']
+                && (incoming().status != 'completed' || (incoming().reviewRating >= 1 && incoming().reviewRating <= 5))
+                && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewRating', 'reviewComment', 'updatedAt'])
+              )
+              ||
+              // Freelancer action: start work or submit work for review
+              (
+                existing().assignedFreelancerUid == request.auth.uid
+                && existing().status in ['payment_verified', 'in_progress', 'revision_requested']
+                && incoming().status in ['in_progress', 'submitted_for_review']
+                && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+              )
+            )
+          )
+        );
+
+      allow delete: if isValidId(orderId) && isAdmin();
+
+      // Master Gate Subcollections on Orders
+      match /files/{fileId} {
+        allow get: if isValidId(orderId) && isValidId(fileId) && (
+          isAdmin()
+          || (isVerifiedUser() && (
+            get(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == request.auth.uid
+            || get(/databases/$(database)/documents/orders/$(orderId)).data.assignedFreelancerUid == request.auth.uid
+          ))
+        );
+        allow list: if isBootstrappedAdmin() || (
+          isVerifiedUser() && (
+            get(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == request.auth.uid
+            || get(/databases/$(database)/documents/orders/$(orderId)).data.assignedFreelancerUid == request.auth.uid
+          )
+        );
+        allow create: if isValidId(orderId) && isValidId(fileId) && isVerifiedUser() && isValidOrderFile(incoming())
+          && incoming().ownerUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && (
+            isAdmin()
+            || (get(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == request.auth.uid && incoming().kind == 'brief')
+            || (get(/databases/$(database)/documents/orders/$(orderId)).data.assignedFreelancerUid == request.auth.uid && incoming().kind == 'deliverable')
+          );
+        allow delete: if isValidId(orderId) && isValidId(fileId) && isAdmin();
+      }
+
+      match /tasks/{taskId} {
+        allow get: if isValidId(orderId) && isValidId(taskId) && (
+          isAdmin()
+          || (isVerifiedUser() && (
+            get(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == request.auth.uid
+            || get(/databases/$(database)/documents/orders/$(orderId)).data.assignedFreelancerUid == request.auth.uid
+          ))
+        );
+        allow list: if isBootstrappedAdmin() || (
+          isVerifiedUser() && (
+            get(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == request.auth.uid
+            || get(/databases/$(database)/documents/orders/$(orderId)).data.assignedFreelancerUid == request.auth.uid
+          )
+        );
+        allow create: if isValidId(orderId) && isValidId(taskId) && isVerifiedUser() && isValidOrderTask(incoming())
+          && incoming().createdByUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && (isAdmin() || get(/databases/$(database)/documents/orders/$(orderId)).data.assignedFreelancerUid == request.auth.uid);
+        allow update: if isValidId(orderId) && isValidId(taskId) && isVerifiedUser() && isValidOrderTask(incoming())
+          && incoming().createdByUid == existing().createdByUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'status', 'updatedAt'])
+          && (isAdmin() || get(/databases/$(database)/documents/orders/$(orderId)).data.assignedFreelancerUid == request.auth.uid);
+        allow delete: if isValidId(orderId) && isValidId(taskId) && (
+          isAdmin() || (isVerifiedUser() && get(/databases/$(database)/documents/orders/$(orderId)).data.assignedFreelancerUid == request.auth.uid)
+        );
+      }
+
+      match /messages/{messageId} {
+        allow get: if isValidId(orderId) && isValidId(messageId) && (
+          isAdmin()
+          || (isVerifiedUser() && (
+            get(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == request.auth.uid
+            || get(/databases/$(database)/documents/orders/$(orderId)).data.assignedFreelancerUid == request.auth.uid
+          ))
+        );
+        allow list: if isBootstrappedAdmin() || (
+          isVerifiedUser() && (
+            get(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == request.auth.uid
+            || get(/databases/$(database)/documents/orders/$(orderId)).data.assignedFreelancerUid == request.auth.uid
+          )
+        );
+        allow create: if isValidId(orderId) && isValidId(messageId) && isVerifiedUser() && isValidOrderMessage(incoming())
+          && incoming().senderUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && (
+            isAdmin()
+            || get(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == request.auth.uid
+            || get(/databases/$(database)/documents/orders/$(orderId)).data.assignedFreelancerUid == request.auth.uid
+          );
+        allow delete: if isValidId(orderId) && isValidId(messageId) && isAdmin();
+      }
+    }
+
+    // Assignments & Earnings Ledger
+    match /assignments/{assignmentId} {
+      allow get: if isValidId(assignmentId) && (isAdmin() || (isVerifiedUser() && existing().freelancerUid == request.auth.uid));
+      allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.freelancerUid == request.auth.uid);
+      allow create: if isValidId(assignmentId) && isAdmin() && isValidAssignment(incoming())
+        && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(assignmentId) && isVerifiedUser() && isValidAssignment(incoming())
+        && incoming().orderId == existing().orderId
+        && incoming().freelancerUid == existing().freelancerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (existing().freelancerUid == request.auth.uid && existing().status == 'active' && incoming().status == 'submitted'
+              && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+        );
+      allow delete: if isValidId(assignmentId) && isAdmin();
+    }
+
+    // Verified Reviews (publicly readable)
+    match /reviews/{reviewId} {
+      allow get: if isValidId(reviewId);
+      allow list: if true;
+      allow create: if isValidId(reviewId) && isVerifiedUser() && isValidReview(incoming())
+        && incoming().customerUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/orders/$(incoming().orderId))
+        && get(/databases/$(database)/documents/orders/$(incoming().orderId)).data.customerUid == request.auth.uid;
+      allow update, delete: if isValidId(reviewId) && isAdmin();
+    }
+
+    // Agency Settings
+    match /settings/payment {
+      allow get: if true;
+      allow create, update: if isAdmin() && isValidPaymentSettings(incoming()) && incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /settings/commission {
+      allow get: if isAdmin();
+      allow create, update: if isAdmin() && isValidCommissionSettings(incoming()) && incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+  }
+}
